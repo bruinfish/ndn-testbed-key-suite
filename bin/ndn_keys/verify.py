@@ -167,20 +167,25 @@ class key_verifier:
         if len(dataName) <= len(keyName)-1:
             return { "authorized":False, "formattedName":"%s%s: %s%s" % (bcolors.FAIL,"Invalid key name", str(keyName), bcolors.ENDC)}
 
-        keyBase = str(keyName[:-1])
-        dataBase = str(dataName[0:len(keyName)-1])  # this has to be this way (it's keyName length, not dataName length)
+        if self._isVersioned(keyName):
+            keyBase = keyName[:-2]
+        else:
+            keyBase = keyName[:-1]
+        dataBase = dataName[0:len(keyBase)]  # this has to be this way (it's keyName length, not dataName length)
+
         if keyBase == dataBase:
             return { "authorized":True,
                      "formattedName":"%s[AUTH KEY]%s %s%s%s%s" % (
                          bcolors.OKBLUE, bcolors.ENDC,
-                         bcolors.OKGREEN, keyBase, bcolors.ENDC,
-                         str(pyccn.Name ().append (keyName[-1]))
+                         bcolors.OKGREEN, keyName[:len(keyBase)], bcolors.ENDC,
+                         str(keyName[len(keyBase):])
                          ) }
         else:
             return { "authorized":False,
                      "formattedName":"%s[WRONG KEY] %s%s%s" % (
-                         bcolors.FAIL, keyBase, bcolors.ENDC,
-                         str(pyccn.Name ().append (keyName[-1]))) }
+                         bcolors.FAIL, keyName[:len(keyBase)], bcolors.ENDC,
+                         str(keyName[len(keyBase):])
+                     ) }
 
     def getMetaInfo(self, name, key_digest, spaces):
         class KeyInfoClosure(pyccn.Closure):
@@ -240,8 +245,45 @@ class key_verifier:
                 print "%s%s    [FAIL META] Certification expired (ValidTo: %s)%s" % (spaces, bcolors.FAIL, time.ctime(valid_to), bcolors.ENDC)
             return False
 
+    def _isVersioned(self, name):
+        for n in name:
+            if len(n) == 7 and n[0:2] == b'\xfd\x01':
+                return True
+            else:
+                continue
+        return False
+
+    def getVersionedContent(self, name):
+        interestName = pyccn.Name (name)
+        interest_tmpl = pyccn.Interest (interestLifetime=self.args.timeout, minSuffixComponents=1, maxSuffixComponents=100, scope=self.args.scope) 
+
+        class Slurp(pyccn.Closure):
+            def __init__(self):
+                self.finished = False
+
+            def upcall(self, kind, upcallInfo):
+                if kind == pyccn.UPCALL_CONTENT or kind == pyccn.UPCALL_CONTENT_UNVERIFIED:
+                    self.co = upcallInfo.ContentObject
+                elif kind == pyccn.UPCALL_INTEREST_TIMED_OUT:
+                    self.co = None
+
+                self.finished = True
+                return pyccn.RESULT_OK
+
+        slurp = Slurp ()
+        self.ccn.expressInterest(interestName, slurp, interest_tmpl)
+
+        while not slurp.finished:
+            self.ccn.run (1)
+
+        return slurp.co
+
     def getVerifiedKey (self, keyname, spaces):
-        latestVersion = self.getLatestVersion (keyname) # will cache, if necessary
+        if self._isVersioned(keyname):
+            latestVersion = self.getVersionedContent(keyname)
+        else:
+            latestVersion = self.getLatestVersion (keyname) # will cache, if necessary
+
         if not latestVersion:
             return None
 
