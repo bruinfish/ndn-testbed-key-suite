@@ -3,7 +3,8 @@
 import argparse
 import os
 import hashlib
-from pycnn import CCN, Key, Name
+import pyccn
+from pyccn import CCN, Key, Name
 from M2Crypto import X509
 
 
@@ -39,10 +40,16 @@ parser.add_argument("-F", "--keystorepath",
                     required=True, 
                     metavar="path-to-signing-key-direcotry", 
                     help="specify the path to the keystore (directory that contains .ccnx_keystore file). Keystore password can be defined through CCNX_KEYSTORE_PASSWORD environment variable")
-parser.add_argument("-P", "--signkeyprefix", 
-                    required=True, 
+group = parser.add_mutually_exclusive_group()
+group.add_argument("-P", "--signkeyprefix", 
                     metavar="prefix-of-signing-key", 
                     help="specify the name prefix of signing public key (or \"self\" for self-signed key)")
+group.add_argument("-C", "--signkeycert",
+                   metavar="cert-of-signing-key",
+                   help="specify the cert file of signing key")
+group.add_argument("-v", "--version",
+                   metavar="version-of-signing-key",
+                   help="specify the cert file of signing key")
 parser.add_argument("-x", "--validity", 
                     required=True, 
                     type=int,
@@ -53,44 +60,8 @@ parser.add_argument("-o", "--cert",
                     help="specify the pub_cert file for the key owner (without suffix); default replacing key_file's suffix with \".pubcert\"")
 
 
-nargs = parser.parse_args()
+args = parser.parse_args()
 
-args = nargs
-
-if os.path.isfile(args.keyfile):
-    sys.stderr.write("Cannot open key file " + args.keyfile + "\n")
-    sys.exit(1)
-
-if os.path.isdir(args.keystorepath):
-    sys.stderr.write("-F should specify directory where .ccnx_keystore file is located\n")
-    sys.exit(1)
-
-if args.cert = None:
-    base_name = os.path.splitext(args.keyfile)
-    cert = basename + ".pubcert"
-else:
-    cert = args.cert + ".pubcert"
-
-
-handler = CCN()
-
-
-key_der = X509.load_cert(args.keyfile, X509.FORMAT_PEM).get_pubkey().as_der()
-pub_key = Key()
-pub_key.fromDER(public=key_der)
-
-k_name = Name(args.keyprefix).appendKeyID(pub_key).appendVersion()
-repo_w_name = k_name.append('\xC1.R.sw').appendNonce()
-repo_w_interest = pyccn.Interest (scope=1, interestLifetime=2)
-
-i_name = 
-valid_to = int(time.time() + 0.5 + args.validity*24*3600)
-i_data = "<Meta><Name>" + args.identity + "</Name><Affiliation>" + args.identity + "</Affiliation><Valid_to>" + str(valid_to) + "</Valid_to></Meta>" 
-
-old_home = os.environ['HOME']
-os.environ['HOME'] = args.keystorepath
-
-sk_name = Name(args.signkeyprefix)
 
 
 
@@ -119,12 +90,8 @@ class PubKeyClosure (pyccn.Closure):
 
         return pyccn.RESULT_OK
 
-repo_w_closure = RepoWriteClosure()
-pubKey_closure = PubKeyClosure()
-pubKey_closure.keyBits = key_der
-pubKey_closure.signInfo = 
+from publish import KeyPublisher
 
-handler.setInterestFilter (k_name.appendSegment(0), pubKey_closure)
-
-handler.expressInterest (repo_w_name, repo_w_closure, repo_w_interest)
-handler.run (3000)
+kp = KeyPublisher(args)
+kp.init()
+kp.show()
