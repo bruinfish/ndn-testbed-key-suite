@@ -76,9 +76,9 @@ class KeyPublisher():
                         keyName = keyName.append(binascii.a2b_hex(child.text))
                 self.signkeyName = keyName
 
-        self.signedInfo = pyccn.SignedInfo (key_digest=handler.getDefaultKey ().publicKeyID, freshness=5)
-
         os.environ['HOME'] = self.args.keystorepath
+        keyLocator = pyccn.KeyLocator(self.signkeyName)
+        self.signedInfo = pyccn.SignedInfo (key_digest=self.handler.getDefaultKey ().publicKeyID, key_locator=keyLocator, freshness=5)
 
     def _setCertFile(self):
         if self.args.cert:
@@ -87,6 +87,7 @@ class KeyPublisher():
             self.certFile = os.path.splitext(self.args.keyfile)[0] + '.pcert'
 
     def init(self):
+        self.handler = pyccn.CCN()
         self._setKeyBits()
         self._setMeta()
         self._setKeyName()
@@ -94,16 +95,24 @@ class KeyPublisher():
         self._setSignKeyReady()
 
     def publish(self):
-        repo_w_name = self.KeyName.append('\xC1.R.sw').appendNonce()
-        repo_w_interest = pyccn.Interest (scope=1, interestLifetime=2)
+        repo_w_name = self.keyName.append('\xC1.R.sw').appendNonce()
+        repo_w_interest = pyccn.Interest (scope=1, interestLifetime=2.0)
 
+        handler = self.handler
         keyName = self.keyName
         keyBits = self.keybits
         signedInfo = self.signedInfo
 
         class RepoWriteClosure (pyccn.Closure):
+            def __init__(self):
+                self.finished = False
+
             def upcall(self, kind, upcallInfo):
-                if kind == pyccn.UPCALL_CONTENT or kind == pyccn.UPCALL_CONTENT_UNVERIFIED:
+                if kind == pyccn.UPCALL_CONTENT:
+                    self.finished = True
+                    return pyccn.RESULT_OK;
+
+                elif kind == pyccn.UPCALL_CONTENT_UNVERIFIED:
                     return pyccn.RESULT_OK;
 
                 elif kind == pyccn.UPCALL_INTEREST_TIMED_OUT:
@@ -118,21 +127,27 @@ class KeyPublisher():
                     
                     sys.stderr.write("<< PyCCN %s\n" % interest.name)
                     
-                    co = pyccn.ContentObject (name=keyName, content=keybits, 
+                    print keyName.appendSegment(0) == interest.name
+                    
+                    co = pyccn.ContentObject (name=interest.name, content=keyBits, 
                                               signed_info=signedInfo)
                     co.sign (handler.getDefaultKey ())
+                    # print binascii.b2a_hex(handler.getDefaultKey().publicKeyID)
+                    # print co
+                    # print co.ccn_data
 
-                    handler.put (co)
+                    handler.put(co)
 
                     return pyccn.RESULT_OK
 
-        handler = CCN()
         repo_w_closure = RepoWriteClosure()
         pubKey_closure = PubKeyClosure()
+        
+        print self.keyName.appendSegment(0)
 
-        handler.setInterestFilter (k_name, pubKey_closure)
-        handler.expressInterest (repo_w_name, repo_w_closure, repo_w_interest)
-        handler.run (10)
+        self.handler.setInterestFilter (self.keyName.appendSegment(0), pubKey_closure)
+        self.handler.expressInterest (repo_w_name, repo_w_closure, repo_w_interest)
+        self.handler.run (100)
 
 
 
@@ -142,4 +157,5 @@ class KeyPublisher():
         print 'KeyName ' + str(self.keyName)
         print 'CertFile ' + self.certFile
         print 'SignKey ' + str(self.signkeyName)
+        print 'SignInfo ' + self.signedInfo.__repr__()
         print 'KeyStore ' + self.args.keystorepath

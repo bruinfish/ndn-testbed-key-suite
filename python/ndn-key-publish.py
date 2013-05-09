@@ -94,4 +94,5 @@ from publish import KeyPublisher
 
 kp = KeyPublisher(args)
 kp.init()
-kp.show()
+# kp.show()
+kp.publish()
