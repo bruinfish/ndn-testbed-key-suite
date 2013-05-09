@@ -76,6 +76,8 @@ class KeyPublisher():
                         keyName = keyName.append(binascii.a2b_hex(child.text))
                 self.signkeyName = keyName
 
+        self.signedInfo = pyccn.SignedInfo (key_digest=handler.getDefaultKey ().publicKeyID, freshness=5)
+
         os.environ['HOME'] = self.args.keystorepath
 
     def _setCertFile(self):
@@ -92,7 +94,47 @@ class KeyPublisher():
         self._setSignKeyReady()
 
     def publish(self):
-        print 'publish'
+        repo_w_name = self.KeyName.append('\xC1.R.sw').appendNonce()
+        repo_w_interest = pyccn.Interest (scope=1, interestLifetime=2)
+
+        keyName = self.keyName
+        keyBits = self.keybits
+        signedInfo = self.signedInfo
+
+        class RepoWriteClosure (pyccn.Closure):
+            def upcall(self, kind, upcallInfo):
+                if kind == pyccn.UPCALL_CONTENT or kind == pyccn.UPCALL_CONTENT_UNVERIFIED:
+                    return pyccn.RESULT_OK;
+
+                elif kind == pyccn.UPCALL_INTEREST_TIMED_OUT:
+                    return pyccn.RESULT_REEXPRESS
+
+                return pyccn.RESULT_OK
+
+        class PubKeyClosure (pyccn.Closure):
+            def upcall(self, kind, upcallInfo):
+                if kind == pyccn.UPCALL_INTEREST:
+                    interest = upcallInfo.Interest
+                    
+                    sys.stderr.write("<< PyCCN %s\n" % interest.name)
+                    
+                    co = pyccn.ContentObject (name=keyName, content=keybits, 
+                                              signed_info=signedInfo)
+                    co.sign (handler.getDefaultKey ())
+
+                    handler.put (co)
+
+                    return pyccn.RESULT_OK
+
+        handler = CCN()
+        repo_w_closure = RepoWriteClosure()
+        pubKey_closure = PubKeyClosure()
+
+        handler.setInterestFilter (k_name, pubKey_closure)
+        handler.expressInterest (repo_w_name, repo_w_closure, repo_w_interest)
+        handler.run (10)
+
+
 
     def show(self):
         print 'KeyBits ' + binascii.b2a_hex(self.keybits)
