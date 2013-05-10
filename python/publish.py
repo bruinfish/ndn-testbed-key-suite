@@ -50,6 +50,7 @@ class KeyPublisher():
             version = self.args.version
 
         self.keyName = pyccn.Name(self.args.keyprefix).appendKeyID(pubKey).append(binascii.a2b_hex(version))
+        self.metaName = pyccn.Name(self.args.keyprefix).append('info').appendKeyID(pubKey).append(binascii.a2b_hex(version))
 
     def _setSignKeyReady(self):
         if not self.args.signkeyprefix and not self.args.signkeycert:
@@ -98,9 +99,13 @@ class KeyPublisher():
         repo_w_name = self.keyName.append('\xC1.R.sw').appendNonce()
         repo_w_interest = pyccn.Interest (scope=1, interestLifetime=2.0)
 
+        repo_w_meta_name = self.metaName.append('\xC1.R.sw').appendNonce()
+        repo_w_meta_interest = pyccn.Interest (scope=1, interestLifetime=2.0)
+
         handler = self.handler
         keyName = self.keyName
         keyBits = self.keybits
+        meta = self.meta
         signedInfo = self.signedInfo
 
         class RepoWriteClosure (pyccn.Closure):
@@ -127,14 +132,24 @@ class KeyPublisher():
                     
                     sys.stderr.write("<< PyCCN %s\n" % interest.name)
                     
-                    print keyName.appendSegment(0) == interest.name
-                    
                     co = pyccn.ContentObject (name=interest.name, content=keyBits, 
                                               signed_info=signedInfo)
                     co.sign (handler.getDefaultKey ())
-                    # print binascii.b2a_hex(handler.getDefaultKey().publicKeyID)
-                    # print co
-                    # print co.ccn_data
+
+                    handler.put(co)
+
+                    return pyccn.RESULT_OK
+
+        class PubMetaClosure (pyccn.Closure):
+            def upcall(self, kind, upcallInfo):
+                if kind == pyccn.UPCALL_INTEREST:
+                    interest = upcallInfo.Interest
+                    
+                    sys.stderr.write("<< PyCCN %s\n" % interest.name)
+                    
+                    co = pyccn.ContentObject (name=interest.name, content=meta, 
+                                              signed_info=signedInfo)
+                    co.sign (handler.getDefaultKey ())
 
                     handler.put(co)
 
@@ -142,11 +157,14 @@ class KeyPublisher():
 
         repo_w_closure = RepoWriteClosure()
         pubKey_closure = PubKeyClosure()
+        pubMeta_closure = PubMetaClosure()
         
         print self.keyName.appendSegment(0)
 
         self.handler.setInterestFilter (self.keyName.appendSegment(0), pubKey_closure)
+        self.handler.setInterestFilter (self.metaName.appendSegment(0), pubMeta_closure)
         self.handler.expressInterest (repo_w_name, repo_w_closure, repo_w_interest)
+        self.handler.expressInterest (repo_w_meta_name, repo_w_closure, repo_w_meta_interest)
         self.handler.run (100)
 
 
